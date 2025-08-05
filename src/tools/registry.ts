@@ -16,9 +16,12 @@ import { GetCurrentTimeHandler } from "../handlers/core/GetCurrentTimeHandler.js
 
 // Define all tool schemas with TypeScript inference
 export const ToolSchemas = {
-  'list-calendars': z.object({}),
+  'list-calendars': z.object({
+    user_id: z.string().describe("ID of the user requesting the operation")
+  }),
   
   'list-events': z.object({
+    user_id: z.string().describe("ID of the user requesting the operation"),
     calendarId: z.string().describe(
       "ID of the calendar(s) to list events from. Accepts either a single calendar ID string or an array of calendar IDs (passed as JSON string like '[\"cal1\", \"cal2\"]')"
     ),
@@ -44,6 +47,7 @@ export const ToolSchemas = {
   }),
   
   'search-events': z.object({
+    user_id: z.string().describe("ID of the user requesting the operation"),
     calendarId: z.string().describe("ID of the calendar (use 'primary' for the main calendar)"),
     query: z.string().describe(
       "Free text search query (searches summary, description, location, attendees, etc.)"
@@ -67,9 +71,12 @@ export const ToolSchemas = {
     )
   }),
   
-  'list-colors': z.object({}),
+  'list-colors': z.object({
+    user_id: z.string().describe("ID of the user requesting the operation")
+  }),
   
   'create-event': z.object({
+    user_id: z.string().describe("ID of the user requesting the operation"),
     calendarId: z.string().describe("ID of the calendar (use 'primary' for the main calendar)"),
     summary: z.string().describe("Title of the event"),
     description: z.string().optional().describe("Description/notes for the event"),
@@ -110,6 +117,7 @@ export const ToolSchemas = {
   }),
   
   'update-event': z.object({
+    user_id: z.string().describe("ID of the user requesting the operation"),
     calendarId: z.string().describe("ID of the calendar (use 'primary' for the main calendar)"),
     eventId: z.string().describe("ID of the event to update"),
     summary: z.string().optional().describe("Updated title of the event"),
@@ -207,6 +215,7 @@ export const ToolSchemas = {
   ),
   
   'delete-event': z.object({
+    user_id: z.string().describe("ID of the user requesting the operation"),
     calendarId: z.string().describe("ID of the calendar (use 'primary' for the main calendar)"),
     eventId: z.string().describe("ID of the event to delete"),
     sendUpdates: z.enum(["all", "externalOnly", "none"]).default("all").describe(
@@ -215,6 +224,7 @@ export const ToolSchemas = {
   }),
   
   'get-freebusy': z.object({
+    user_id: z.string().describe("ID of the user requesting the operation"),
     calendars: z.array(z.object({
       id: z.string().describe("ID of the calendar (use 'primary' for the main calendar)")
     })).describe(
@@ -244,6 +254,7 @@ export const ToolSchemas = {
   }),
   
   'get-current-time': z.object({
+    user_id: z.string().describe("ID of the user requesting the operation"),
     timeZone: z.string().optional().describe(
       "Optional IANA timezone (e.g., 'America/Los_Angeles', 'Europe/London', 'UTC'). If not provided, returns UTC time and system timezone for reference."
     )

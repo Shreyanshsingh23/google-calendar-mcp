@@ -6,6 +6,7 @@ import { OAuth2Client } from "google-auth-library";
 import { initializeOAuth2Client } from './auth/client.js';
 import { AuthServer } from './auth/server.js';
 import { TokenManager } from './auth/tokenManager.js';
+import { authService } from './services/auth.js';
 
 // Import tool registry
 import { ToolRegistry } from './tools/registry.js';
@@ -122,8 +123,22 @@ export class GoogleCalendarMcpServer {
   }
 
   private async executeWithHandler(handler: any, args: any): Promise<{ content: Array<{ type: "text"; text: string }> }> {
-    await this.ensureAuthenticated();
-    const result = await handler.runTool(args, this.oauth2Client);
+    // Extract user_id from args and get user-specific authenticated client
+    const userId = args.user_id;
+    if (!userId) {
+      throw new McpError(ErrorCode.InvalidRequest, "user_id is required for all operations");
+    }
+
+    // Get user-specific OAuth2Client
+    const userOAuth2Client = await authService.getAuthenticatedClient(userId);
+    if (!userOAuth2Client) {
+      throw new McpError(
+        ErrorCode.InvalidRequest, 
+        `Authentication failed for user: ${userId}. Please ensure the user has connected their Google Calendar.`
+      );
+    }
+
+    const result = await handler.runTool(args, userOAuth2Client);
     return result;
   }
 

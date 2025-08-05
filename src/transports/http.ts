@@ -1,6 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import http from "http";
+import { webhookHandler } from '../handlers/webhookHandler.js';
+import { webhookService } from '../services/webhookService.js';
 
 export interface HttpTransportConfig {
   port?: number;
@@ -96,6 +98,12 @@ export class HttpTransportHandler {
         return;
       }
 
+      // Handle webhook endpoints
+      if (req.url?.startsWith('/webhook/')) {
+        await this.handleWebhookRequest(req, res);
+        return;
+      }
+
       try {
         await transport.handleRequest(req, res);
       } catch (error) {
@@ -116,6 +124,182 @@ export class HttpTransportHandler {
 
     httpServer.listen(port, host, () => {
       process.stderr.write(`Google Calendar MCP Server listening on http://${host}:${port}\n`);
+      
+      // Start webhook refresh schedule
+      webhookService.setupWebhookRefreshSchedule();
+    });
+  }
+
+  private async handleWebhookRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      const pathParts = url.pathname.split('/').filter(Boolean); // ['webhook', ...]
+      
+      if (pathParts.length < 2) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not Found' }));
+        return;
+      }
+
+      const action = pathParts[1]; // 'register', 'unregister', 'calendar', 'full-sync'
+      
+      switch (action) {
+        case 'register':
+          await this.handleWebhookRegister(req, res);
+          break;
+          
+        case 'unregister':
+          await this.handleWebhookUnregister(req, res);
+          break;
+          
+        case 'calendar':
+          if (pathParts.length >= 3) {
+            const userId = pathParts[2];
+            // Simulate Express-like request object
+            const mockReq = { 
+              ...req, 
+              params: { userId },
+              headers: req.headers 
+            };
+            const mockRes = {
+              status: (code: number) => ({
+                send: (data: any) => {
+                  res.writeHead(code, { 'Content-Type': 'application/json' });
+                  res.end(typeof data === 'string' ? data : JSON.stringify(data));
+                }
+              })
+            };
+            await webhookHandler.handleCalendarWebhook(mockReq as any, mockRes as any);
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'User ID required' }));
+          }
+          break;
+          
+        case 'full-sync':
+          if (pathParts.length >= 3) {
+            const userId = pathParts[2];
+            await this.handleFullSync(userId, res);
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'User ID required' }));
+          }
+          break;
+          
+        default:
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Webhook endpoint not found' }));
+      }
+      
+    } catch (error) {
+      console.error('Webhook handling error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal server error' }));
+    }
+  }
+
+  private async handleWebhookRegister(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.parseRequestBody(req);
+      const { user_id } = body;
+      
+      if (!user_id) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'user_id is required' }));
+        return;
+      }
+      
+      const success = await webhookService.registerCalendarWebhook(user_id);
+      
+      if (success) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          status: 'success', 
+          message: 'Webhook registered successfully',
+          user_id 
+        }));
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          error: 'Failed to register webhook',
+          user_id 
+        }));
+      }
+      
+    } catch (error) {
+      console.error('Webhook registration error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal server error' }));
+    }
+  }
+
+  private async handleWebhookUnregister(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.parseRequestBody(req);
+      const { user_id } = body;
+      
+      if (!user_id) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'user_id is required' }));
+        return;
+      }
+      
+      const success = await webhookService.unregisterCalendarWebhook(user_id);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ 
+        status: 'success', 
+        message: success ? 'Webhook unregistered successfully' : 'No webhook found to unregister',
+        user_id 
+      }));
+      
+    } catch (error) {
+      console.error('Webhook unregistration error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal server error' }));
+    }
+  }
+
+  private async handleFullSync(userId: string, res: http.ServerResponse): Promise<void> {
+    try {
+      const success = await webhookHandler.performFullSync(userId);
+      
+      if (success) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          status: 'success', 
+          message: 'Full sync completed successfully',
+          user_id: userId 
+        }));
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          error: 'Full sync failed',
+          user_id: userId 
+        }));
+      }
+      
+    } catch (error) {
+      console.error('Full sync error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal server error' }));
+    }
+  }
+
+  private parseRequestBody(req: http.IncomingMessage): Promise<any> {
+    return new Promise((resolve, reject) => {
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        try {
+          resolve(body ? JSON.parse(body) : {});
+        } catch (error) {
+          reject(new Error('Invalid JSON'));
+        }
+      });
+      req.on('error', reject);
     });
   }
 } 
